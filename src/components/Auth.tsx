@@ -6,19 +6,37 @@ import { motion, AnimatePresence } from 'motion/react';
 export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showRedirect, setShowRedirect] = useState(false);
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (useRedirect = false) => {
     if (loading) return;
     setLoading(true);
     setError(null);
     try {
-      await signInWithGoogle();
-    } catch (err: any) {
-      if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
-        // Silently handle common user cancellations
-        console.log("Popup closed by user");
+      if (useRedirect) {
+        const { getAuth, GoogleAuthProvider, signInWithRedirect } = await import('firebase/auth');
+        const auth = getAuth();
+        const provider = new GoogleAuthProvider();
+        await signInWithRedirect(auth, provider);
       } else {
-        setError("Sign in failed. Please check your connection and try again.");
+        await signInWithGoogle();
+      }
+    } catch (err: any) {
+      console.error("Sign in error:", err);
+      if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
+        console.log("Popup closed by user");
+        // Don't show error for simple close, but maybe show the helper link
+        setShowRedirect(true);
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError("Domain not authorized. Please add this domain to your Firebase Console authorized domains list.");
+      } else if (err.code === 'auth/popup-blocked') {
+        setError("Popup blocked by browser. Please enable popups or use the alternate method below.");
+        setShowRedirect(true);
+      } else if (err.code === 'auth/network-request-failed') {
+        setError("Network error. Please check your internet connection.");
+      } else {
+        setError(`Authentication failed: ${err.message || "Unknown error"}`);
+        setShowRedirect(true);
       }
     } finally {
       setLoading(false);
@@ -56,7 +74,7 @@ export default function Auth() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="text-red-500 text-xs font-bold mb-4 bg-red-500/10 p-3 rounded-xl"
+              className="text-red-500 text-[11px] font-bold mb-4 bg-red-500/10 p-3 rounded-xl border border-red-500/20"
             >
               {error}
             </motion.p>
@@ -64,9 +82,9 @@ export default function Auth() {
         </AnimatePresence>
 
         <button
-          onClick={handleSignIn}
+          onClick={() => handleSignIn(false)}
           disabled={loading}
-          className="w-full bg-white text-black font-black py-4 px-6 rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-200 transition-all hover:scale-[1.02] active:scale-95 shadow-lg disabled:opacity-50 disabled:hover:scale-100"
+          className="w-full bg-white text-black font-black py-4 px-6 rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-200 transition-all hover:scale-[1.02] active:scale-95 shadow-lg disabled:opacity-50 disabled:hover:scale-100 mb-4"
         >
           {loading ? (
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -75,6 +93,15 @@ export default function Auth() {
           )}
           {loading ? 'Connecting...' : 'Sign in with Google'}
         </button>
+
+        {showRedirect && !loading && (
+          <button 
+            onClick={() => handleSignIn(true)}
+            className="text-[10px] text-x-gray font-black uppercase tracking-[0.2em] hover:text-white transition-colors"
+          >
+            Having trouble? Try alternate sign-in
+          </button>
+        )}
       </motion.div>
     </div>
   );
