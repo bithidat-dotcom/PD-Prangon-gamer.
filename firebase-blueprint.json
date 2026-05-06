@@ -10,30 +10,19 @@
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
         "bannerURL": { "type": "string" },
-        "phoneNumber": { "type": "string" },
         "bio": { "type": "string" },
+        "phoneNumber": { "type": "string" },
         "connections": { "type": "array" },
         "mutedUsers": { "type": "array" },
         "blockedUsers": { "type": "array" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["uid", "email"]
-    },
-    "Story": {
-      "title": "Story",
-      "description": "A vanishing image post",
-      "type": "object",
-      "properties": {
-        "authorId": { "type": "string" },
-        "imageUrl": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
-        "expiresAt": { "type": "string", "format": "date-time" }
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["authorId", "imageUrl", "createdAt", "expiresAt"]
+      "required": ["uid", "email", "displayName", "photoURL", "createdAt"]
     },
     "Post": {
       "title": "Post",
-      "description": "A social post (tweet)",
+      "description": "A post created by a user",
       "type": "object",
       "properties": {
         "authorId": { "type": "string" },
@@ -43,71 +32,67 @@
         "commentsCount": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["authorId", "content", "createdAt"]
-    },
-    "Group": {
-      "title": "Group",
-      "description": "A private or public group chat",
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "description": { "type": "string" },
-        "ownerId": { "type": "string" },
-        "members": { "type": "array" },
-        "isPrivate": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["name", "ownerId", "isPrivate"]
-    },
-    "Message": {
-      "title": "Message",
-      "description": "A chat message (encrypted)",
-      "type": "object",
-      "properties": {
-        "chatId": { "type": "string" },
-        "senderId": { "type": "string" },
-        "content": { "type": "string" },
-        "type": { "type": "string", "enum": ["text", "voice", "image"] },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["chatId", "senderId", "content", "type"]
+      "required": ["authorId", "content", "likesCount", "commentsCount", "createdAt"]
     },
     "Chat": {
       "title": "Chat",
-      "description": "A direct or group chat session",
+      "description": "A conversation between users",
       "type": "object",
       "properties": {
         "participants": { "type": "array" },
         "lastMessage": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["participants", "updatedAt"]
+      "required": ["participants"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A message within a chat",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "enum": ["text", "voice", "image"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["chatId", "senderId", "content", "type", "createdAt"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "A temporary story post",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorPhoto": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "authorPhoto", "imageUrl", "createdAt", "expiresAt"]
     }
   },
   "firestore": {
     "users/{userId}": {
       "schema": "User",
-      "description": "Individual user profiles"
+      "description": "Collection of user profiles"
     },
     "posts/{postId}": {
       "schema": "Post",
-      "description": "Public social posts"
-    },
-    "stories/{storyId}": {
-      "schema": "Story",
-      "description": "Vanishing user stories"
-    },
-    "groups/{groupId}": {
-      "schema": "Group",
-      "description": "Group definitions"
+      "description": "Collection of social posts"
     },
     "chats/{chatId}": {
       "schema": "Chat",
-      "description": "Chat sessions"
+      "description": "Collection of conversations"
     },
     "chats/{chatId}/messages/{messageId}": {
       "schema": "Message",
-      "description": "Messages within a chat"
+      "description": "Messages within a conversation"
+    },
+    "stories/{storyId}": {
+      "schema": "Story",
+      "description": "Collection of active stories"
     }
   }
 }

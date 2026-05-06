@@ -56,8 +56,10 @@ export default function UserProfile({ user }: { user: any }) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 1024 * 1024) {
-      alert("Please select an image smaller than 1MB");
+    // Base64 has ~33% overhead. 1MB document limit means we should stay well under that.
+    // 700KB results in ~930KB base64 string, leaving room for other fields.
+    if (file.size > 700 * 1024) {
+      alert("Please select an image smaller than 700KB. For larger files, the database limit might be exceeded.");
       return;
     }
 

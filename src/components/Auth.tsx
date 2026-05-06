@@ -26,11 +26,14 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black">
+    <div className="min-h-screen flex items-center justify-center bg-black overflow-hidden relative">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(29,155,240,0.1),transparent_50%)]" />
+      <div className="absolute top-0 left-0 w-full h-full opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]" />
+      
       <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="text-center p-8 border border-x-border rounded-[40px] max-w-sm w-full bg-zinc-900/50 backdrop-blur-xl shadow-2xl relative overflow-hidden"
+        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="text-center p-8 border border-x-border rounded-[44px] max-w-sm w-full bg-zinc-900/40 backdrop-blur-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] relative z-10"
       >
         <div className="mb-10">
           <motion.img 
