@@ -1,0 +1,15 @@
+{
+  "name": "Conector",
+  "description": "A networking platform focusing on real-time connections, stories, and encrypted chat.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "real-time-messaging",
+    "video-calling",
+    "voice-calling",
+    "e2e-encryption",
+    "stories"
+  ]
+}
