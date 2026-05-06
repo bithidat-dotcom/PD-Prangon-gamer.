@@ -21,11 +21,12 @@ export default function App() {
     const checkUser = async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (currentUser) {
-        const profile = await getUserProfileSupabase(currentUser.id);
+        let profile = await getUserProfileSupabase(currentUser.id);
         if (!profile) {
           await saveUserSupabase(currentUser);
+          profile = await getUserProfileSupabase(currentUser.id);
         }
-        setUser(currentUser);
+        setUser({ ...currentUser, ...profile });
       }
       setLoading(false);
     };
@@ -36,11 +37,13 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       const currentUser = session?.user;
       if (currentUser) {
-        const profile = await getUserProfileSupabase(currentUser.id);
+        let profile = await getUserProfileSupabase(currentUser.id);
         if (!profile) {
           await saveUserSupabase(currentUser);
+          profile = await getUserProfileSupabase(currentUser.id);
         }
-        setUser(currentUser);
+        // Merge auth metadata with database profile
+        setUser({ ...currentUser, ...profile });
       } else {
         setUser(null);
       }
