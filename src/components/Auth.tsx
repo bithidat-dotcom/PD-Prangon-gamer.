@@ -28,7 +28,16 @@ export default function Auth() {
         // Don't show error for simple close, but maybe show the helper link
         setShowRedirect(true);
       } else if (err.code === 'auth/unauthorized-domain') {
-        setError("Domain not authorized. Please add this domain to your Firebase Console authorized domains list.");
+        const domain = window.location.hostname;
+        setError(
+          `Domain "${domain}" is not authorized. 
+
+To fix this:
+1. Go to Firebase Console
+2. Authentication > Settings > Authorized domains
+3. Add: ${domain}
+4. Also add: localhost, 127.0.0.1`
+        );
       } else if (err.code === 'auth/popup-blocked') {
         setError("Popup blocked by browser. Please enable popups or use the alternate method below.");
         setShowRedirect(true);

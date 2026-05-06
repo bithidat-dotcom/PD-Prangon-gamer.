@@ -72,6 +72,16 @@ service cloud.firestore {
         && request.auth.uid in data.participants;
     }
 
+    function isValidGroup(data) {
+      return data.keys().hasAll(['name', 'ownerId', 'members', 'isPrivate', 'createdAt'])
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() <= 50
+        && data.members is list && data.members.size() > 0
+        && data.members[0] == request.auth.uid
+        && data.isPrivate is bool
+        && data.createdAt == request.time;
+    }
+
     // --- Collections ---
 
     match /users/{userId} {
@@ -111,10 +121,7 @@ service cloud.firestore {
 
     match /groups/{groupId} {
       allow read: if isSignedIn() && (!existing().isPrivate || request.auth.uid in existing().members);
-      allow create: if isSignedIn() && isValidId(groupId) 
-        && incoming().ownerId == request.auth.uid
-        && incoming().members.size() > 0
-        && incoming().members[0] == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(groupId) && isValidGroup(incoming());
       allow update: if isSignedIn() && (
         (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasAny(['name', 'description', 'isPrivate', 'members']))
         || (incoming().diff(existing()).affectedKeys().hasOnly(['members']) && request.auth.uid in incoming().members)

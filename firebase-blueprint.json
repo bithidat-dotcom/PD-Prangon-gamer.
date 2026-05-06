@@ -71,6 +71,20 @@
         "expiresAt": { "type": "string", "format": "date-time" }
       },
       "required": ["authorId", "authorName", "authorPhoto", "imageUrl", "createdAt", "expiresAt"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "A community group",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "members": { "type": "array" },
+        "isPrivate": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId", "members"]
     }
   },
   "firestore": {
@@ -93,6 +107,10 @@
     "stories/{storyId}": {
       "schema": "Story",
       "description": "Collection of active stories"
+    },
+    "groups/{groupId}": {
+      "schema": "Group",
+      "description": "Community groups"
     }
   }
 }
