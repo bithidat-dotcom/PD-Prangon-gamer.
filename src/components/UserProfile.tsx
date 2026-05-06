@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../lib/firebase';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../lib/error-handler';
+import { supabase } from '../lib/supabase';
 import { Camera, Edit3, Phone, User as UserIcon, Mail, Info, Save, Settings } from 'lucide-react';
 import { motion } from 'motion/react';
 import SettingsModal from './SettingsModal';
@@ -17,49 +15,57 @@ export default function UserProfile({ user }: { user: any }) {
   });
   const [saving, setSaving] = useState(false);
 
+  const currentUserId = user.id || user.uid;
+
   useEffect(() => {
     const fetchProfile = async () => {
-      const docRef = doc(db, 'users', user.uid);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const data = snap.data();
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', currentUserId)
+        .single();
+      
+      if (data) {
         setProfile(data);
         setFormData({
-          displayName: data.displayName || '',
-          phoneNumber: data.phoneNumber || '',
+          displayName: data.display_name || data.displayName || '',
+          phoneNumber: data.phone_number || data.phoneNumber || '',
           bio: data.bio || ''
         });
       }
     };
     fetchProfile();
-  }, [user.uid]);
+  }, [currentUserId]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        displayName: formData.displayName,
-        phoneNumber: formData.phoneNumber,
-        bio: formData.bio,
-        updatedAt: serverTimestamp()
-      });
-      setProfile({ ...profile, ...formData });
-      setIsEditing(false);
+      const { error } = await supabase
+        .from('users')
+        .update({
+          display_name: formData.displayName,
+          phone_number: formData.phoneNumber,
+          bio: formData.bio,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', currentUserId);
+      
+      if (!error) {
+        setProfile({ ...profile, ...formData, display_name: formData.displayName, phone_number: formData.phoneNumber });
+        setIsEditing(false);
+      }
     } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+      console.error(e);
     }
     setSaving(false);
   };
 
-  const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: 'photoURL' | 'bannerURL') => {
+  const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: 'photo_url' | 'banner_url') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Base64 has ~33% overhead. 1MB document limit means we should stay well under that.
-    // 700KB results in ~930KB base64 string, leaving room for other fields.
     if (file.size > 700 * 1024) {
-      alert("Please select an image smaller than 700KB. For larger files, the database limit might be exceeded.");
+      alert("Please select an image smaller than 700KB.");
       return;
     }
 
@@ -68,14 +74,19 @@ export default function UserProfile({ user }: { user: any }) {
       const base64String = reader.result as string;
       setSaving(true);
       try {
-        const userRef = doc(db, 'users', user.uid);
-        await updateDoc(userRef, { 
-          [field]: base64String,
-          updatedAt: serverTimestamp()
-        });
-        setProfile((prev: any) => ({ ...prev, [field]: base64String }));
+        const { error } = await supabase
+          .from('users')
+          .update({ 
+            [field]: base64String,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', currentUserId);
+        
+        if (!error) {
+          setProfile((prev: any) => ({ ...prev, [field]: base64String }));
+        }
       } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+        console.error(err);
       }
       setSaving(false);
     };
@@ -88,8 +99,8 @@ export default function UserProfile({ user }: { user: any }) {
     <div className="w-full">
       {/* Banner Section */}
       <div className="h-48 bg-zinc-900 border-b border-white/5 relative group overflow-hidden">
-         {profile.bannerURL ? (
-           <img src={profile.bannerURL} className="w-full h-full object-cover" />
+         {profile.banner_url || profile.bannerURL ? (
+           <img src={profile.banner_url || profile.bannerURL} className="w-full h-full object-cover" />
          ) : (
            <div className="absolute inset-0 bg-gradient-to-r from-zinc-800 to-zinc-900 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20" />
          )}
@@ -99,7 +110,7 @@ export default function UserProfile({ user }: { user: any }) {
               type="file" 
               accept="image/*" 
               className="hidden" 
-              onChange={(e) => handleMediaUpload(e, 'bannerURL')}
+              onChange={(e) => handleMediaUpload(e, 'banner_url')}
               disabled={saving}
             />
          </label>
@@ -108,14 +119,14 @@ export default function UserProfile({ user }: { user: any }) {
       <div className="px-8 -mt-20 relative">
         <div className="flex flex-col md:flex-row items-end justify-between gap-6">
           <div className="relative group">
-            <img src={profile.photoURL} alt="" className="w-32 h-32 rounded-[32px] border-4 border-black bg-zinc-900 shadow-xl object-cover" />
+            <img src={profile.photo_url || profile.photoURL} alt="" className="w-32 h-32 rounded-[32px] border-4 border-black bg-zinc-900 shadow-xl object-cover" />
             <label className="absolute inset-0 bg-black/40 rounded-[32px] opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer transition-all hover:bg-black/60">
                <Camera size={24} className="text-white" />
                <input 
                  type="file" 
                  accept="image/*" 
                  className="hidden" 
-                 onChange={(e) => handleMediaUpload(e, 'photoURL')}
+                 onChange={(e) => handleMediaUpload(e, 'photo_url')}
                  disabled={saving}
                />
             </label>
@@ -127,7 +138,7 @@ export default function UserProfile({ user }: { user: any }) {
           </div>
           
           <div className="flex-1 pb-2">
-            <h1 className="text-3xl font-black">{profile.displayName}</h1>
+            <h1 className="text-3xl font-black">{profile.display_name || profile.displayName}</h1>
             <p className="text-x-blue font-bold">@{profile.email.split('@')[0]}</p>
           </div>
 

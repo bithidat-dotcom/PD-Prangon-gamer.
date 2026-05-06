@@ -1,10 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from '../lib/firebase';
-import { 
-  collection, query, where, orderBy, onSnapshot, 
-  addDoc, serverTimestamp, getDocs, doc, updateDoc, 
-  setDoc, arrayUnion, getDoc 
-} from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 import { 
   Search, Settings, MessageSquarePlus, Send, 
   Video, Phone, Plus, Users, Shield, Mic, 
@@ -16,56 +11,93 @@ import { encryptMessage, decryptMessage } from '../lib/encryption';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function ChatSection({ user, startCall }: { user: any, startCall: any }) {
-  const [chats, setChats] = useState<(Chat & { otherUser?: User })[]>([]);
-  const [selectedChat, setSelectedChat] = useState<(Chat & { otherUser?: User }) | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [chats, setChats] = useState<(any & { otherUser?: any })[]>([]);
+  const [selectedChat, setSelectedChat] = useState<(any & { otherUser?: any }) | null>(null);
+  const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [searchUser, setSearchUser] = useState('');
-  const [foundUsers, setFoundUsers] = useState<User[]>([]);
+  const [foundUsers, setFoundUsers] = useState<any[]>([]);
   const [isFirstTimePromptOpen, setIsFirstTimePromptOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  const currentUserId = user.id || user.uid;
+
   useEffect(() => {
-    const q = query(
-      collection(db, 'chats'), 
-      where('participants', 'array-contains', user.uid),
-      orderBy('updatedAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const chatData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Chat[];
+    const fetchChats = async () => {
+      // Supabase filter for array overlap
+      const { data, error } = await supabase
+        .from('chats')
+        .select('*')
+        .contains('participants', [currentUserId]);
       
-      // Enrich private chats with other user's data
-      const enrichedChats = await Promise.all(chatData.map(async chat => {
-        if (!chat.isGroup) {
-          const otherUid = chat.participants.find(p => p !== user.uid);
-          if (otherUid) {
-            const uSnap = await getDoc(doc(db, 'users', otherUid));
-            if (uSnap.exists()) {
-              return { ...chat, otherUser: uSnap.data() as User };
+      if (data) {
+        const enrichedChats = await Promise.all(data.map(async chat => {
+          if (!chat.is_group && !chat.isGroup) {
+            const otherUid = chat.participants.find((p: string) => p !== currentUserId);
+            if (otherUid) {
+              const { data: uSnap } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', otherUid)
+                .single();
+              if (uSnap) {
+                return { ...chat, otherUser: uSnap };
+              }
             }
           }
-        }
-        return chat;
-      }));
+          return chat;
+        }));
+        setChats(enrichedChats);
+      }
+    };
 
-      setChats(enrichedChats);
-    });
-    return unsubscribe;
-  }, [user.uid]);
+    fetchChats();
+
+    const chatsSub = supabase
+      .channel('public:chats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' }, fetchChats)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(chatsSub);
+    };
+  }, [currentUserId]);
 
   useEffect(() => {
     if (!selectedChat) return;
-    const q = query(
-      collection(db, `chats/${selectedChat.id}/messages`), 
-      orderBy('createdAt', 'asc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Message[]);
-    });
-    return unsubscribe;
+
+    const fetchMessages = async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('chat_id', selectedChat.id)
+        .order('created_at', { ascending: true });
+      
+      if (data) {
+        setMessages(data);
+      }
+    };
+
+    fetchMessages();
+
+    const messagesSub = supabase
+      .channel(`public:messages:chat:${selectedChat.id}`)
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'messages',
+        filter: `chat_id=eq.${selectedChat.id}`
+      }, (payload) => {
+        setMessages(prev => [...prev, payload.new]);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(messagesSub);
+    };
   }, [selectedChat]);
 
   useEffect(() => {
@@ -76,52 +108,81 @@ export default function ChatSection({ user, startCall }: { user: any, startCall:
     if (!newMessage.trim() || !selectedChat) return;
     const encrypted = encryptMessage(newMessage, selectedChat.id);
     try {
-      await addDoc(collection(db, `chats/${selectedChat.id}/messages`), {
-        chatId: selectedChat.id,
-        senderId: user.uid,
-        content: encrypted,
-        type: 'text',
-        createdAt: serverTimestamp(),
-      });
-      await updateDoc(doc(db, 'chats', selectedChat.id), {
-        lastMessage: newMessage,
-        updatedAt: serverTimestamp(),
-      });
+      const { error: msgErr } = await supabase
+        .from('messages')
+        .insert({
+          chat_id: selectedChat.id,
+          sender_id: currentUserId,
+          content: encrypted,
+          type: 'text',
+          created_at: new Date().toISOString()
+        });
+      
+      if (msgErr) throw msgErr;
+
+      const { error: chatErr } = await supabase
+        .from('chats')
+        .update({
+          last_message: newMessage,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedChat.id);
+      
+      if (chatErr) throw chatErr;
+
       setNewMessage('');
     } catch (error) {
       console.error("Message send error:", error);
     }
   };
 
-  const createChat = async (otherUser: User) => {
-    const chatId = [user.uid, otherUser.uid].sort().join('_');
-    const chatRef = doc(db, 'chats', chatId);
-    const chatSnap = await getDocs(query(collection(db, 'chats'), where('participants', '==', [user.uid, otherUser.uid].sort())));
+  const createChat = async (otherUser: any) => {
+    const otherId = otherUser.id || otherUser.uid;
+    const participants = [currentUserId, otherId].sort();
+    const chatId = participants.join('_');
+
+    const { data: existingChat } = await supabase
+      .from('chats')
+      .select('*')
+      .eq('id', chatId)
+      .single();
     
-    if (chatSnap.empty) {
-      await setDoc(chatRef, {
-        participants: [user.uid, otherUser.uid].sort(),
-        updatedAt: serverTimestamp(),
-        isGroup: false,
-      });
+    if (!existingChat) {
+      const { error } = await supabase
+        .from('chats')
+        .insert({
+          id: chatId,
+          participants: participants,
+          updated_at: new Date().toISOString(),
+          is_group: false
+        });
+      if (error) console.error(error);
     }
-    setSelectedChat({ id: chatId, participants: [user.uid, otherUser.uid], updatedAt: new Date(), isGroup: false });
+    
+    setSelectedChat({ id: chatId, participants, updated_at: new Date().toISOString(), is_group: false, otherUser });
     setFoundUsers([]);
   };
 
   const createGroup = async () => {
     if (!groupName.trim()) return;
     try {
-      const res = await addDoc(collection(db, 'chats'), {
-        name: groupName,
-        participants: [user.uid],
-        ownerId: user.uid,
-        isGroup: true,
-        updatedAt: serverTimestamp(),
-      });
+      const { data, error } = await supabase
+        .from('chats')
+        .insert({
+          name: groupName,
+          participants: [currentUserId],
+          owner_id: currentUserId,
+          is_group: true,
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+
       setIsGroupModalOpen(false);
       setGroupName('');
-      setSelectedChat({ id: res.id, name: groupName, participants: [user.uid], isGroup: true, updatedAt: new Date() });
+      setSelectedChat(data);
     } catch (e) {
       console.error(e);
     }
@@ -152,9 +213,11 @@ export default function ChatSection({ user, startCall }: { user: any, startCall:
                 const val = e.target.value;
                 setSearchUser(val);
                 if (val.length > 1) {
-                   const q = query(collection(db, 'users'), where('displayName', '>=', val), where('displayName', '<=', val + '\uf8ff'));
-                   const snap = await getDocs(q);
-                   setFoundUsers(snap.docs.map(d => d.data()) as User[]);
+                   const { data } = await supabase
+                     .from('users')
+                     .select('*')
+                     .or(`display_name.ilike.%${val}%,email.ilike.%${val}%`);
+                   setFoundUsers(data || []);
                 } else {
                   setFoundUsers([]);
                 }
@@ -168,10 +231,10 @@ export default function ChatSection({ user, startCall }: { user: any, startCall:
             <div className="p-2 bg-x-blue/10 border-b border-x-border">
               <p className="text-xs font-black text-x-blue mb-3 uppercase tracking-[0.2em] px-3 mt-2">New conversation</p>
               {foundUsers.map(u => (
-                <div key={u.uid} onClick={() => createChat(u)} className="flex items-center gap-3 p-3 hover:bg-x-hover cursor-pointer rounded-2xl transition-all mb-1 border border-transparent hover:border-white/5">
-                  <img src={u.photoURL} className="w-12 h-12 rounded-full border border-white/10" />
+                <div key={u.id || u.uid} onClick={() => createChat(u)} className="flex items-center gap-3 p-3 hover:bg-x-hover cursor-pointer rounded-2xl transition-all mb-1 border border-transparent hover:border-white/5">
+                  <img src={u.photo_url || u.photoURL} className="w-12 h-12 rounded-full border border-white/10" />
                   <div>
-                    <p className="font-bold text-sm">{u.displayName}</p>
+                    <p className="font-bold text-sm">{u.display_name || u.displayName}</p>
                     <p className="text-[10px] text-x-gray uppercase font-black">Click to chat</p>
                   </div>
                 </div>
@@ -195,18 +258,18 @@ export default function ChatSection({ user, startCall }: { user: any, startCall:
             >
               <div className="relative">
                 <img 
-                  src={chat.isGroup ? "https://ui-avatars.com/api/?name=Group&background=1d9bf0&color=fff" : chat.otherUser?.photoURL || `https://ui-avatars.com/api/?name=${chat.id}`} 
+                  src={chat.is_group || chat.isGroup ? "https://ui-avatars.com/api/?name=Group&background=1d9bf0&color=fff" : chat.otherUser?.photo_url || chat.otherUser?.photoURL || `https://ui-avatars.com/api/?name=${chat.id}`} 
                   className="w-12 h-12 rounded-full ring-2 ring-x-border object-cover" 
                 />
-                {!chat.isGroup && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-black" />}
-                {chat.isGroup && <Users className="absolute -bottom-1 -right-1 bg-x-blue p-1 rounded-full text-white w-5 h-5 border-2 border-black" />}
+                {!chat.is_group && !chat.isGroup && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-black" />}
+                {(chat.is_group || chat.isGroup) && <Users className="absolute -bottom-1 -right-1 bg-x-blue p-1 rounded-full text-white w-5 h-5 border-2 border-black" />}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center mb-0.5">
-                  <span className="font-bold truncate">{chat.name || chat.otherUser?.displayName || "Private Chat"}</span>
-                  <span className="text-[10px] uppercase font-black text-x-gray">{chat.updatedAt ? formatDistanceToNow(chat.updatedAt.toDate(), { addSuffix: false }) : ''}</span>
+                  <span className="font-bold truncate">{chat.name || chat.otherUser?.display_name || chat.otherUser?.displayName || "Private Chat"}</span>
+                  <span className="text-[10px] uppercase font-black text-x-gray">{chat.updated_at || chat.updatedAt ? formatDistanceToNow(new Date(chat.updated_at || chat.updatedAt), { addSuffix: false }) : ''}</span>
                 </div>
-                <p className="text-sm text-x-gray truncate">{chat.lastMessage || 'No messages yet'}</p>
+                <p className="text-sm text-x-gray truncate">{chat.last_message || chat.lastMessage || 'No messages yet'}</p>
               </div>
             </div>
           ))}
@@ -240,9 +303,9 @@ export default function ChatSection({ user, startCall }: { user: any, startCall:
                 <button onClick={() => setSelectedChat(null)} className="md:hidden p-2 hover:bg-x-hover rounded-full">
                   <ChevronLeft />
                 </button>
-                <img src={selectedChat.isGroup ? "https://ui-avatars.com/api/?name=Group&background=1d9bf0&color=fff" : selectedChat.otherUser?.photoURL || `https://ui-avatars.com/api/?name=${selectedChat.id}`} alt="" className="w-10 h-10 rounded-full object-cover" />
+                <img src={selectedChat.is_group || selectedChat.isGroup ? "https://ui-avatars.com/api/?name=Group&background=1d9bf0&color=fff" : selectedChat.otherUser?.photo_url || selectedChat.otherUser?.photoURL || `https://ui-avatars.com/api/?name=${selectedChat.id}`} alt="" className="w-10 h-10 rounded-full object-cover" />
                 <div>
-                  <h4 className="font-bold">{selectedChat.name || selectedChat.otherUser?.displayName || "Private Chat"}</h4>
+                  <h4 className="font-bold">{selectedChat.name || selectedChat.otherUser?.display_name || selectedChat.otherUser?.displayName || "Private Chat"}</h4>
                   <div className="flex items-center gap-1.5 text-xs text-green-500">
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
                     Online
@@ -250,10 +313,10 @@ export default function ChatSection({ user, startCall }: { user: any, startCall:
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={() => startCall(selectedChat.participants.find(p => p !== user.uid), 'voice')} className="p-2.5 hover:bg-x-hover rounded-full text-x-blue transition-colors">
+                <button onClick={() => startCall(selectedChat.participants.find((p: string) => p !== currentUserId), 'voice')} className="p-2.5 hover:bg-x-hover rounded-full text-x-blue transition-colors">
                   <Phone size={20} />
                 </button>
-                <button onClick={() => startCall(selectedChat.participants.find(p => p !== user.uid), 'video')} className="p-2.5 hover:bg-x-hover rounded-full text-x-blue transition-colors">
+                <button onClick={() => startCall(selectedChat.participants.find((p: string) => p !== currentUserId), 'video')} className="p-2.5 hover:bg-x-hover rounded-full text-x-blue transition-colors">
                   <Video size={20} />
                 </button>
                 <button className="p-2.5 hover:bg-x-hover rounded-full text-x-gray transition-colors">
@@ -275,16 +338,16 @@ export default function ChatSection({ user, startCall }: { user: any, startCall:
                     initial={{ opacity: 0, scale: 0.95, y: 10 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     key={msg.id}
-                    className={`flex ${msg.senderId === user.uid ? 'justify-end' : 'justify-start'}`}
+                    className={`flex ${msg.sender_id === currentUserId ? 'justify-end' : 'justify-start'}`}
                   >
                     <div className={`max-w-[80%] rounded-2xl p-3 px-4 shadow-sm relative group ${
-                      msg.senderId === user.uid 
+                      msg.sender_id === currentUserId 
                         ? 'bg-x-blue text-white rounded-br-sm' 
                         : 'bg-x-border text-white rounded-bl-sm'
                     }`}>
                       <p className="text-[15px]">{decryptMessage(msg.content, selectedChat.id)}</p>
                       <span className="text-[10px] opacity-50 block mt-1">
-                        {msg.createdAt && new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {msg.created_at && new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
                   </motion.div>

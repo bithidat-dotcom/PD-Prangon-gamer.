@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../lib/firebase';
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, getDocs, where, limit, doc, getDoc } from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 import { Plus, Camera, X, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -9,40 +8,50 @@ export default function StorySection({ user }: { user: any }) {
   const [isUploading, setIsUploading] = useState(false);
   const [activeStory, setActiveStory] = useState<any>(null);
 
+  const currentUserId = user.id || user.uid;
+  const displayName = user.user_metadata?.full_name || user.display_name || 'Conector User';
+  const photoURL = user.user_metadata?.avatar_url || user.photo_url || `https://ui-avatars.com/api/?name=${user.email}`;
+
   useEffect(() => {
     const fetchConnectionsAndStories = async () => {
-      const userRef = doc(db, 'users', user.uid);
-      const userSnap = await getDoc(userRef);
-      const connections = userSnap.exists() ? (userSnap.data().connections || []) : [];
-      const authorIds = [...connections, user.uid];
-
-      // Since 'in' query has a limit of 30, we might need to batch if many connections
-      // For this app, we'll assume under 30 or just show first 30
-      const limitedAuthorIds = authorIds.slice(0, 30);
+      const { data: userSnap } = await supabase
+        .from('users')
+        .select('connections')
+        .eq('id', currentUserId)
+        .single();
+      
+      const connections = userSnap?.connections || [];
+      const authorIds = [...connections, currentUserId];
 
       // Show stories from last 24 hours
       const yesterday = new Date();
       yesterday.setHours(yesterday.getHours() - 24);
 
-      const q = query(
-        collection(db, 'stories'), 
-        where('authorId', 'in', limitedAuthorIds),
-        where('createdAt', '>=', yesterday),
-        orderBy('createdAt', 'desc')
-      );
+      const { data: storiesData } = await supabase
+        .from('stories')
+        .select('*')
+        .in('author_id', authorIds)
+        .gte('created_at', yesterday.toISOString())
+        .order('created_at', { ascending: false });
       
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        setStories(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
-      return unsubscribe;
+      if (storiesData) {
+        setStories(storiesData);
+      }
     };
 
     fetchConnectionsAndStories();
-  }, [user.uid]);
+
+    const storiesSub = supabase
+      .channel('public:stories')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stories' }, fetchConnectionsAndStories)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(storiesSub);
+    };
+  }, [currentUserId]);
 
   const postStory = async () => {
-    // Since I cannot actually upload files to a storage bucket here, 
-    // I will use random high-quality images as "captured" photos
     setIsUploading(true);
     const randomImgs = [
       'https://images.unsplash.com/photo-1506744038136-46273834b3fb',
@@ -53,14 +62,18 @@ export default function StorySection({ user }: { user: any }) {
     const img = randomImgs[Math.floor(Math.random() * randomImgs.length)] + '?auto=format&fit=crop&w=800&q=80';
 
     try {
-      await addDoc(collection(db, 'stories'), {
-        authorId: user.uid,
-        authorName: user.displayName,
-        authorPhoto: user.photoURL,
-        imageUrl: img,
-        createdAt: serverTimestamp(),
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-      });
+      const { error } = await supabase
+        .from('stories')
+        .insert({
+          author_id: currentUserId,
+          author_name: displayName,
+          author_photo: photoURL,
+          image_url: img,
+          created_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        });
+      
+      if (error) throw error;
     } catch (e) {
       console.error(e);
     }
@@ -99,11 +112,11 @@ export default function StorySection({ user }: { user: any }) {
             onClick={() => setActiveStory(story)}
             className="aspect-[9/16] relative bg-zinc-900 rounded-3xl overflow-hidden cursor-pointer group border border-white/5"
           >
-            <img src={story.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+            <img src={story.image_url || story.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
             <div className="absolute bottom-4 left-4 flex items-center gap-2">
-               <img src={story.authorPhoto} className="w-8 h-8 rounded-full border-2 border-white ring-2 ring-x-blue" />
-               <span className="text-xs font-bold text-white shadow-sm truncate max-w-[80px]">{story.authorName}</span>
+               <img src={story.author_photo || story.authorPhoto} className="w-8 h-8 rounded-full border-2 border-white ring-2 ring-x-blue" />
+               <span className="text-xs font-bold text-white shadow-sm truncate max-w-[80px]">{story.author_name || story.authorName}</span>
             </div>
             <div className="absolute top-4 right-4 p-2 bg-black/40 backdrop-blur-md rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
                <Play size={14} className="fill-white" />
@@ -122,13 +135,13 @@ export default function StorySection({ user }: { user: any }) {
             className="fixed inset-0 z-[200] bg-black/95 flex flex-col items-center justify-center p-4"
           >
             <div className="relative w-full max-w-sm aspect-[9/16] bg-zinc-900 rounded-[40px] overflow-hidden shadow-2xl">
-              <img src={activeStory.imageUrl} className="w-full h-full object-cover" />
+              <img src={activeStory.image_url || activeStory.imageUrl} className="w-full h-full object-cover" />
               
               <div className="absolute top-0 inset-x-0 p-4 pt-8 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <img src={activeStory.authorPhoto} className="w-10 h-10 rounded-full border-2 border-white" />
+                  <img src={activeStory.author_photo || activeStory.authorPhoto} className="w-10 h-10 rounded-full border-2 border-white" />
                   <div>
-                    <p className="font-black text-sm">{activeStory.authorName}</p>
+                    <p className="font-black text-sm">{activeStory.author_name || activeStory.authorName}</p>
                     <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Story • 24h</p>
                   </div>
                 </div>

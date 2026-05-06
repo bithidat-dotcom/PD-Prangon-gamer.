@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { db, auth } from '../lib/firebase';
-import { doc, getDoc, updateDoc, arrayRemove } from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 import { X, LogOut, ChevronRight, Shield, Bell, UserX, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -16,6 +15,8 @@ export default function SettingsModal({ user, isOpen, onClose, onUnblock }: Sett
   const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const currentUserId = user.id || user.uid;
+
   React.useEffect(() => {
     if (isOpen) {
       fetchBlockedUsers();
@@ -23,19 +24,20 @@ export default function SettingsModal({ user, isOpen, onClose, onUnblock }: Sett
   }, [isOpen]);
 
   const fetchBlockedUsers = async () => {
-    const userRef = doc(db, 'users', user.uid);
-    const snap = await getDoc(userRef);
-    if (snap.exists()) {
-      const blockedIds = snap.data().blockedUsers || [];
+    const { data: userData } = await supabase
+      .from('users')
+      .select('blocked_users')
+      .eq('id', currentUserId)
+      .single();
+    
+    if (userData) {
+      const blockedIds = userData.blocked_users || [];
       if (blockedIds.length > 0) {
-        // Fetch profiles for these IDs
-        const profiles = await Promise.all(
-          blockedIds.map(async (id: string) => {
-            const uSnap = await getDoc(doc(db, 'users', id));
-            return uSnap.exists() ? { uid: id, ...uSnap.data() } : { uid: id, displayName: 'Unknown' };
-          })
-        );
-        setBlockedUsers(profiles);
+        const { data: profiles } = await supabase
+          .from('users')
+          .select('*')
+          .in('id', blockedIds);
+        setBlockedUsers(profiles || []);
       } else {
         setBlockedUsers([]);
       }
@@ -44,11 +46,14 @@ export default function SettingsModal({ user, isOpen, onClose, onUnblock }: Sett
 
   const handleUnblock = async (targetUid: string) => {
     try {
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        blockedUsers: arrayRemove(targetUid)
-      });
-      setBlockedUsers(prev => prev.filter(u => u.uid !== targetUid));
+      const newBlocked = blockedUsers.filter(u => (u.id || u.uid) !== targetUid).map(u => u.id || u.uid);
+      await supabase
+        .from('users')
+        .update({
+          blocked_users: newBlocked
+        })
+        .eq('id', currentUserId);
+      setBlockedUsers(prev => prev.filter(u => (u.id || u.uid) !== targetUid));
       onUnblock();
     } catch (e) {
       console.error(e);
@@ -56,7 +61,7 @@ export default function SettingsModal({ user, isOpen, onClose, onUnblock }: Sett
   };
 
   const handleSignOut = () => {
-    auth.signOut();
+    supabase.auth.signOut();
   };
 
   return (
@@ -95,13 +100,13 @@ export default function SettingsModal({ user, isOpen, onClose, onUnblock }: Sett
                   {blockedUsers.length > 0 ? (
                     <div className="space-y-2 mt-2">
                       {blockedUsers.map(u => (
-                        <div key={u.uid} className="flex items-center justify-between p-3 bg-white/5 rounded-xl ml-4">
+                        <div key={u.id || u.uid} className="flex items-center justify-between p-3 bg-white/5 rounded-xl ml-4">
                           <div className="flex items-center gap-3">
-                            <img src={u.photoURL} className="w-8 h-8 rounded-full" />
-                            <span className="font-bold text-sm">{u.displayName}</span>
+                            <img src={u.photo_url || u.photoURL} className="w-8 h-8 rounded-full" />
+                            <span className="font-bold text-sm">{u.display_name || u.displayName}</span>
                           </div>
                           <button 
-                            onClick={() => handleUnblock(u.uid)}
+                            onClick={() => handleUnblock(u.id || u.uid)}
                             className="text-xs font-black text-x-blue hover:underline"
                           >
                             Unblock

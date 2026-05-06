@@ -1,52 +1,48 @@
 import React, { useState } from 'react';
-import { LogIn, Loader2 } from 'lucide-react';
-import { signInWithGoogle } from '../lib/firebase';
+import { LogIn, Loader2, Mail, Lock, User as UserIcon } from 'lucide-react';
+import { signInWithGoogleSupabase, signInWithEmailSupabase, signUpWithEmailSupabase } from '../lib/auth-supabase';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showRedirect, setShowRedirect] = useState(false);
+  const [mode, setMode] = useState<'google' | 'email-login' | 'email-signup'>('google');
+  
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
 
-  const handleSignIn = async (useRedirect = false) => {
+  const handleGoogleSignIn = async () => {
     if (loading) return;
     setLoading(true);
     setError(null);
     try {
-      if (useRedirect) {
-        const { getAuth, GoogleAuthProvider, signInWithRedirect } = await import('firebase/auth');
-        const auth = getAuth();
-        const provider = new GoogleAuthProvider();
-        await signInWithRedirect(auth, provider);
-      } else {
-        await signInWithGoogle();
-      }
+      await signInWithGoogleSupabase();
     } catch (err: any) {
       console.error("Sign in error:", err);
-      if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
-        console.log("Popup closed by user");
-        // Don't show error for simple close, but maybe show the helper link
-        setShowRedirect(true);
-      } else if (err.code === 'auth/unauthorized-domain') {
-        const domain = window.location.hostname;
-        setError(
-          `Domain "${domain}" is not authorized. 
+      setError(`Authentication failed: ${err.message || "Unknown error"}.`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-To fix this:
-1. Go to Firebase Console
-2. Authentication > Settings > Authorized domains
-3. Add: ${domain}
-4. Also add: localhost, 127.0.0.1`
-        );
-      } else if (err.code === 'auth/popup-blocked') {
-        setError("Popup blocked by browser. Please enable popups or use the alternate method below.");
-        setShowRedirect(true);
-      } else if (err.code === 'auth/network-request-failed') {
-        setError("Network error. Please check your internet connection.");
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (mode === 'email-signup') {
+        if (!fullName) throw new Error("Full name is required");
+        await signUpWithEmailSupabase(email, password, fullName);
+        setError("Success! Please check your email for confirmation.");
       } else {
-        setError(`Authentication failed: ${err.message || "Unknown error"}`);
-        setShowRedirect(true);
+        await signInWithEmailSupabase(email, password);
       }
+    } catch (err: any) {
+      console.error("Email auth error:", err);
+      setError(err.message || "Authentication failed");
     } finally {
       setLoading(false);
     }
@@ -55,29 +51,28 @@ To fix this:
   return (
     <div className="min-h-screen flex items-center justify-center bg-black overflow-hidden relative">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(29,155,240,0.1),transparent_50%)]" />
-      <div className="absolute top-0 left-0 w-full h-full opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]" />
       
       <motion.div 
         initial={{ opacity: 0, y: 20, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="text-center p-8 border border-x-border rounded-[44px] max-w-sm w-full bg-zinc-900/40 backdrop-blur-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] relative z-10"
+        className="text-center p-8 border border-white/5 rounded-[44px] max-w-sm w-full bg-zinc-900/40 backdrop-blur-2xl shadow-2xl relative z-10"
       >
         <div className="mb-10">
           <motion.img 
             src="https://i.ibb.co.com/d0LcTMfR/Dmitri-dmiiiitri-on-X.jpg" 
             alt="Conector" 
-            animate={loading ? { scale: [1, 1.1, 1], rotate: [0, 5, -5, 0] } : { scale: 1, rotate: 0 }}
+            animate={loading ? { scale: [1, 1.1, 1] } : { scale: 1 }}
             transition={loading ? { repeat: Infinity, duration: 2 } : {}}
-            className="w-20 h-20 mx-auto rounded-3xl shadow-xl border border-white/10"
+            className="w-16 h-16 mx-auto rounded-2xl border border-white/10"
             onError={(e) => {
               (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=C&background=fff&color=000&bold=true&size=128';
             }}
           />
         </div>
-        <h1 className="text-4xl font-black mb-2 text-white tracking-tighter">CONECTOR</h1>
-        <p className="text-x-gray font-bold mb-10 uppercase tracking-[0.3em] text-[10px]">Connect with purpose</p>
+        <h1 className="text-3xl font-black mb-1 text-white tracking-tighter">CONECTOR</h1>
+        <p className="text-x-gray font-bold mb-8 uppercase tracking-[0.3em] text-[10px]">Connect with purpose</p>
         
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
           {error && (
             <motion.p 
               initial={{ opacity: 0, height: 0 }}
@@ -90,26 +85,90 @@ To fix this:
           )}
         </AnimatePresence>
 
-        <button
-          onClick={() => handleSignIn(false)}
-          disabled={loading}
-          className="w-full bg-white text-black font-black py-4 px-6 rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-200 transition-all hover:scale-[1.02] active:scale-95 shadow-lg disabled:opacity-50 disabled:hover:scale-100 mb-4"
-        >
-          {loading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="" />
-          )}
-          {loading ? 'Connecting...' : 'Sign in with Google'}
-        </button>
-
-        {showRedirect && !loading && (
-          <button 
-            onClick={() => handleSignIn(true)}
-            className="text-[10px] text-x-gray font-black uppercase tracking-[0.2em] hover:text-white transition-colors"
-          >
-            Having trouble? Try alternate sign-in
-          </button>
+        {mode === 'google' ? (
+          <div className="space-y-3">
+            <button
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+              className="w-full bg-white text-black font-black py-4 px-6 rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-200 transition-all active:scale-95 shadow-lg disabled:opacity-50"
+            >
+              {loading ? <Loader2 className="animate-spin" /> : <img src="https://www.google.com/favicon.ico" className="w-5 h-5" />}
+              Continue with Google
+            </button>
+            <div className="flex items-center gap-4 my-6">
+              <div className="h-[1px] flex-1 bg-white/10" />
+              <span className="text-[10px] text-x-gray font-black uppercase">OR</span>
+              <div className="h-[1px] flex-1 bg-white/10" />
+            </div>
+            <button
+              onClick={() => setMode('email-login')}
+              className="w-full bg-zinc-800 text-white font-black py-4 rounded-2xl hover:bg-zinc-700 transition-all flex items-center justify-center gap-2"
+            >
+              <Mail size={18} />
+              Continue with Email
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleEmailAuth} className="space-y-3 text-left">
+            {mode === 'email-signup' && (
+              <div className="relative">
+                <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-x-gray w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="Full Name"
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full bg-zinc-800/50 border border-white/5 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-x-blue transition-colors"
+                />
+              </div>
+            )}
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-x-gray w-5 h-5" />
+              <input
+                type="email"
+                placeholder="Email Address"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-zinc-800/50 border border-white/5 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-x-blue transition-colors"
+              />
+            </div>
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-x-gray w-5 h-5" />
+              <input
+                type="password"
+                placeholder="Password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-zinc-800/50 border border-white/5 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-x-blue transition-colors"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-x-blue text-white font-black py-4 rounded-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-lg shadow-x-blue/20 disabled:opacity-50"
+            >
+              {loading ? <Loader2 className="animate-spin" /> : mode === 'email-login' ? 'Sign In' : 'Create Account'}
+            </button>
+            <div className="text-center mt-4">
+              <button
+                type="button"
+                onClick={() => setMode(mode === 'email-login' ? 'email-signup' : 'email-login')}
+                className="text-xs text-x-gray font-bold hover:text-white transition-colors"
+              >
+                {mode === 'email-login' ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMode('google')}
+              className="w-full text-xs text-x-gray font-black uppercase tracking-widest mt-4 hover:text-white"
+            >
+              ← Back to Google
+            </button>
+          </form>
         )}
       </motion.div>
     </div>

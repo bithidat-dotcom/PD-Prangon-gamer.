@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth, db } from './lib/firebase';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from './lib/supabase';
+import { saveUserSupabase, getUserProfileSupabase } from './lib/database-supabase';
 import Auth from './components/Auth';
 import { Compass, MessageCircle, User, LogOut, Video, Phone, Image, Search } from 'lucide-react';
 import DiscoverUsers from './components/DiscoverUsers';
@@ -15,25 +14,31 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState<'home' | 'stories' | 'messages' | 'profile'>('home');
-  const { callState, startCall, answerCall, endCall } = usePeer(user?.uid);
+  const { callState, startCall, answerCall, endCall } = usePeer(user?.id || user?.uid);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    // Initial user check
+    const checkUser = async () => {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (currentUser) {
-        const userRef = doc(db, 'users', currentUser.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
-          await setDoc(userRef, {
-            uid: currentUser.uid,
-            email: currentUser.email,
-            displayName: currentUser.displayName || 'Conector User',
-            photoURL: currentUser.photoURL || `https://ui-avatars.com/api/?name=${currentUser.email}`,
-            phoneNumber: '',
-            bio: '',
-            connections: [],
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
+        const profile = await getUserProfileSupabase(currentUser.id);
+        if (!profile) {
+          await saveUserSupabase(currentUser);
+        }
+        setUser(currentUser);
+      }
+      setLoading(false);
+    };
+
+    checkUser();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const currentUser = session?.user;
+      if (currentUser) {
+        const profile = await getUserProfileSupabase(currentUser.id);
+        if (!profile) {
+          await saveUserSupabase(currentUser);
         }
         setUser(currentUser);
       } else {
@@ -41,11 +46,17 @@ export default function App() {
       }
       setLoading(false);
     });
-    return unsubscribe;
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-white">Loading...</div>;
   if (!user) return <Auth />;
+
+  const displayName = user.user_metadata?.full_name || user.display_name || 'Conector User';
+  const photoURL = user.user_metadata?.avatar_url || user.photo_url || `https://ui-avatars.com/api/?name=${user.email}`;
 
   return (
     <div className="flex flex-col md:flex-row min-h-screen max-w-7xl mx-auto bg-black text-white">
@@ -70,10 +81,10 @@ export default function App() {
           <SidebarItem icon={<User />} label="Profile" active={page === 'profile'} onClick={() => setPage('profile')} />
         </nav>
 
-        <div className="mt-auto p-3 rounded-full hover:bg-x-hover cursor-pointer transition-colors flex items-center gap-3" onClick={() => auth.signOut()}>
-          <img src={user.photoURL} className="w-10 h-10 rounded-full" />
+        <div className="mt-auto p-3 rounded-full hover:bg-x-hover cursor-pointer transition-colors flex items-center gap-3" onClick={() => supabase.auth.signOut()}>
+          <img src={photoURL} className="w-10 h-10 rounded-full" />
           <div className="flex-1 truncate">
-            <p className="font-bold truncate">{user.displayName}</p>
+            <p className="font-bold truncate">{displayName}</p>
             <p className="text-x-gray text-xs truncate">Log out</p>
           </div>
           <LogOut size={18} />
